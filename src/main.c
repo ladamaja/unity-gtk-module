@@ -16,6 +16,7 @@
  * Authors: Ryan Lortie <desrt@desrt.ca>
  *          William Hua <william.hua@canonical.com>
  */
+#include <gtk/gtk.h>
 
 #ifdef GDK_WINDOWING_WAYLAND
 #include <gdk/gdkwayland.h>
@@ -23,9 +24,10 @@
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
-#include <gtk/gtk.h>
+
 #include <gio/gio.h>
 #include <glib.h>
+#include <glib/gprintf.h>
 #include "unity-gtk-parser.h"
 
 /*
@@ -56,6 +58,10 @@ static const char * const BLACKLIST[] =
 #define _UNITY_OBJECT_PATH       "_UNITY_OBJECT_PATH"
 #define _GTK_MENUBAR_OBJECT_PATH "_GTK_MENUBAR_OBJECT_PATH"
 #define OBJECT_PATH              "/com/canonical/unity/gtk/window"
+
+#define XSETTINGS_NAME "org.gnome.settings-daemon.plugins.xsettings"
+#define XSETTINGS_TARGET "overrides"
+#define XSETTINGS_PROPERTY "Gtk/ShellShowsMenubar"
 
 G_DEFINE_QUARK (window_data, window_data);
 G_DEFINE_QUARK (menu_shell_data, menu_shell_data);
@@ -370,8 +376,83 @@ gtk_menu_shell_get_menu_shell_data (GtkMenuShell *menu_shell)
   return menu_shell_data;
 }
 
+#ifdef GDK_WINDOWING_WAYLAND
 static WindowData *
-gtk_window_get_window_data (GtkWindow *window)
+gtk_window_get_wayland_window_data (GtkWindow *window)
+{
+  WindowData *window_data;
+
+  g_return_val_if_fail (GTK_IS_WINDOW (window), NULL);
+
+  window_data = g_object_get_qdata (G_OBJECT (window), window_data_quark ());
+  if (window_data == NULL)
+    {
+      window_data = window_data_new ();
+      window_data->menu_model = g_menu_new ();
+
+      if (GTK_IS_APPLICATION_WINDOW (window))
+        {
+          GDBusMenuModel *old_menu_model = NULL;
+          GDBusActionGroup *old_action_group = NULL;
+          static guint window_id;
+          GtkApplication *application;
+          GApplication *gApp;
+          GDBusConnection *connection;
+          gchar *object_path;
+          gchar *unity_object_path;
+          gchar *menubar_object_path;
+          gchar *unique_bus_name;
+
+          application = gtk_window_get_application (window);
+          g_return_if_fail (GTK_IS_APPLICATION (application));
+
+          window_data->action_group = NULL;
+
+          gApp = G_APPLICATION (application);
+          g_return_if_fail (g_application_get_is_registered (gApp));
+          g_return_if_fail (!g_application_get_is_remote (gApp));
+
+          g_return_if_fail (window_data->menu_model == NULL || G_IS_MENU_MODEL (window_data->menu_model));
+
+          connection = g_application_get_dbus_connection (gApp);
+          window_data->window_id = window_id++; //IN THE GNOME IMPLEMENTATION THIS IS STARTED IN ONE NOT CERO (So, we make is similar)
+          object_path = g_strdup_printf (OBJECT_PATH "/%d", window_id);
+
+          unique_bus_name = g_strdup_printf ("%s", g_dbus_connection_get_unique_name (connection));
+          unity_object_path = g_strdup_printf ("%s%s",
+            g_application_get_dbus_object_path (gApp) != NULL ? g_application_get_dbus_object_path (gApp) : object_path,
+            g_application_get_dbus_object_path (gApp) != NULL ? "/menus/menubar" : "");
+          menubar_object_path = g_strdup_printf ("%s", unity_object_path);
+
+          old_menu_model = gtk_application_get_menubar (application);
+          if (old_menu_model != NULL)
+            {
+              old_action_group = g_dbus_action_group_get (connection, unique_bus_name, unity_object_path);
+              window_data->old_model = g_object_ref (old_menu_model);
+              g_menu_append_section (window_data->menu_model, NULL, G_MENU_MODEL (old_menu_model));
+            }
+
+          //Set the actions
+          window_data->action_group = unity_gtk_action_group_new (G_ACTION_GROUP (old_action_group));
+          window_data->action_group_export_id = g_dbus_connection_export_action_group (connection, unity_object_path, G_ACTION_GROUP (window_data->action_group), NULL);
+
+          //Set the menubar
+          gtk_application_set_menubar(GTK_APPLICATION (application), G_MENU_MODEL (window_data->menu_model));
+
+          g_free (object_path);
+          g_free (unique_bus_name);
+          g_free (unity_object_path);
+          g_free (menubar_object_path);
+        }
+      g_object_set_qdata_full (G_OBJECT (window), window_data_quark (), window_data, window_data_free);
+    }
+  return window_data;
+}
+#endif
+
+#ifdef GDK_WINDOWING_X11
+static WindowData *
+gtk_window_get_x11_window_data (GtkWindow *window)
 {
   WindowData *window_data;
 
@@ -431,6 +512,27 @@ gtk_window_get_window_data (GtkWindow *window)
       g_free (object_path);
     }
 
+  return window_data;
+}
+#endif
+
+static WindowData *
+gtk_window_get_window_data (GtkWindow *window)
+{
+  WindowData *window_data;
+
+  g_return_val_if_fail (GTK_IS_WINDOW (window), NULL);
+
+#if (defined(GDK_WINDOWING_WAYLAND))
+  if (GDK_IS_WAYLAND_DISPLAY (gdk_display_get_default ()))
+      window_data = gtk_window_get_wayland_window_data (window);
+#endif
+#if (defined(GDK_WINDOWING_X11))
+#if GTK_MAJOR_VERSION == 3
+  if (GDK_IS_X11_DISPLAY (gdk_display_get_default ()))
+#endif
+      window_data = gtk_window_get_x11_window_data (window);
+#endif
   return window_data;
 }
 
@@ -596,10 +698,19 @@ hijacked_application_window_realize (GtkWidget *widget)
 {
   g_return_if_fail (GTK_IS_APPLICATION_WINDOW (widget));
 
+  //In Wayland the DBUS Menu need to be register before realize the window.
+#ifdef GDK_WINDOWING_WAYLAND
+  if (GDK_IS_WAYLAND_DISPLAY (gdk_display_get_default ()))
+    gtk_window_get_window_data (GTK_WINDOW (widget));
+#endif
+
   if (pre_hijacked_application_window_realize != NULL)
     (* pre_hijacked_application_window_realize) (widget);
 
-  gtk_window_get_window_data (GTK_WINDOW (widget));
+#ifdef GDK_WINDOWING_X11
+  if (GDK_IS_X11_DISPLAY (gdk_display_get_default ()))
+    gtk_window_get_window_data (GTK_WINDOW (widget));
+#endif
 }
 #endif
 
