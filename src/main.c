@@ -17,8 +17,15 @@
  *          William Hua <william.hua@canonical.com>
  */
 
-#include <gtk/gtk.h>
+#ifdef GDK_WINDOWING_WAYLAND
+#include <gdk/gdkwayland.h>
+#endif
+#ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
+#endif
+#include <gtk/gtk.h>
+#include <gio/gio.h>
+#include <glib.h>
 #include "unity-gtk-parser.h"
 
 /*
@@ -834,10 +841,9 @@ gtk_module_init (void)
 {
   const gchar *proxy = g_getenv ("UBUNTU_MENUPROXY");
 
-  /* We only support X11 */
-#if GTK_MAJOR_VERSION == 3
-  if (!GDK_IS_X11_DISPLAY (gdk_display_get_default ()))
-    return;
+  /* We only support X11 and WAYLAND */
+#if (!defined(GDK_WINDOWING_X11) || !defined(GDK_WINDOWING_WAYLAND))
+   return;
 #endif
 
   if ((proxy == NULL || is_true (proxy)) && !is_blacklisted (g_get_prgname ()))
