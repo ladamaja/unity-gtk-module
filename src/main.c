@@ -548,15 +548,28 @@ gtk_settings_handle_gtk_shell_shows_menubar (GObject    *object,
 static void
 hijacked_window_realize (GtkWidget *widget)
 {
+  GtkWindow *window;
+  GdkScreen *screen;
+  GdkVisual *visual;
+
   g_return_if_fail (GTK_IS_WINDOW (widget));
+
+  window = GTK_WINDOW (widget);
+
+  screen = gtk_widget_get_screen(widget);
+  visual = gdk_screen_get_rgba_visual(screen);
+  if (visual && (gtk_window_get_type_hint (window) == GDK_WINDOW_TYPE_HINT_DND))
+    gtk_widget_set_visual(widget, visual);
 
   if (pre_hijacked_window_realize != NULL)
     (* pre_hijacked_window_realize) (widget);
 
+  if (!(gtk_window_get_type_hint(window) == GDK_WINDOW_TYPE_HINT_DND)
 #if GTK_MAJOR_VERSION == 3
-  if (!GTK_IS_APPLICATION_WINDOW (widget))
+      && (!GTK_IS_APPLICATION_WINDOW (widget))
 #endif
-    gtk_window_get_window_data (GTK_WINDOW (widget));
+     )
+    gtk_window_get_window_data (window);
 }
 
 static void
