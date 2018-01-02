@@ -947,6 +947,68 @@ hijack_menu_bar_class_vtable (GType type)
   g_free (children);
 }
 
+static gboolean
+get_xsettings_shell_shows_menubar ()
+{
+  GSettings *gsettings;
+  GVariant *sources;
+  GVariantIter *iter;
+  GVariant *prop_value;
+  gchar *prop_name;
+  gint32 *value = 0;
+
+  gsettings = g_settings_new (XSETTINGS_NAME);
+  sources = g_settings_get_value (gsettings, XSETTINGS_TARGET);
+
+  g_variant_get (sources, "a{sv}", &iter);
+  while (g_variant_iter_loop (iter, "{sv}", &prop_name, &prop_value))
+    {
+      if ((g_strcmp0(prop_name, XSETTINGS_PROPERTY) == 0) && g_variant_is_of_type (prop_value, G_VARIANT_TYPE_INT32))
+        {
+          g_variant_get(prop_value, "i", &value);
+          break;
+        }
+    }
+  g_variant_iter_free (iter);
+  g_object_unref (gsettings);
+
+  return (GPOINTER_TO_INT(value) == 1);
+}
+
+static gboolean
+sync_shell_shows_menubar ()
+{
+  GtkSettings *settings;
+  GParamSpec *pspec;
+  gboolean shell_shows_menubar;
+  gboolean xsettings_shell_shows_menubar;
+
+  settings = gtk_settings_get_default();
+
+  g_return_val_if_fail (GTK_IS_SETTINGS (settings), FALSE);
+
+  pspec = g_object_class_find_property (G_OBJECT_GET_CLASS (settings), "gtk-shell-shows-menubar");
+
+  g_return_val_if_fail (G_IS_PARAM_SPEC (pspec), FALSE);
+  g_return_val_if_fail (pspec->value_type == G_TYPE_BOOLEAN, FALSE);
+
+  xsettings_shell_shows_menubar = get_xsettings_shell_shows_menubar ();
+  g_object_get (settings, "gtk-shell-shows-menubar", &shell_shows_menubar, NULL);
+
+  if (xsettings_shell_shows_menubar != shell_shows_menubar)
+    {
+      g_object_set (settings, "gtk-shell-shows-menubar", xsettings_shell_shows_menubar, NULL);
+      return TRUE;
+    }
+  return FALSE;
+}
+
+static void
+xsettings_shell_shows_menubar_changed (GSettings *settings, const gchar *key, gpointer data)
+{
+  sync_shell_shows_menubar ();
+}
+
 void
 gtk_module_init (void)
 {
@@ -960,6 +1022,12 @@ gtk_module_init (void)
   if ((proxy == NULL || is_true (proxy)) && !is_blacklisted (g_get_prgname ()))
     {
       GtkWidgetClass *widget_class;
+      GSettings *gsettings;
+
+      sync_shell_shows_menubar ();
+      gsettings = g_settings_new (XSETTINGS_NAME);
+      g_signal_connect (gsettings, "changed::"XSETTINGS_TARGET, G_CALLBACK (xsettings_shell_shows_menubar_changed), NULL);
+      g_object_unref (gsettings);
 
       unity_gtk_menu_shell_set_debug (is_true (g_getenv ("UNITY_GTK_MENU_SHELL_DEBUG")));
       unity_gtk_action_group_set_debug (is_true (g_getenv ("UNITY_GTK_ACTION_GROUP_DEBUG")));
