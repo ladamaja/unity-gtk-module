@@ -34,7 +34,6 @@ Pre-Depends: ${misc:Pre-Depends},
              dpkg (>= 1.15.7.2),
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         libgtk2.0-0 (>= 2.24.0),
 Description: GtkMenuShell to GMenuModel parser
  This library converts GtkMenuShells into GMenuModels.
 

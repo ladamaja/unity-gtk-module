@@ -28,3 +28,6 @@ override_dh_auto_install:
 override_dh_install:
 	find debian/tmp -name \*.la -exec rm {} \;
 	dh_install --fail-missing
+
+override_dh_shlibdeps:
+	dh_shlibdeps -- -xlibgtk2.0-0
