@@ -1009,13 +1009,35 @@ xsettings_shell_shows_menubar_changed (GSettings *settings, const gchar *key, gp
   sync_shell_shows_menubar ();
 }
 
+static void
+sync_gtk2_settings()
+{
+#if GTK_MAJOR_VERSION < 3
+  GtkSettings *settings;
+  GParamSpec *pspec;
+
+  pspec = g_object_class_find_property (g_type_class_ref (GTK_TYPE_SETTINGS), "gtk-shell-shows-menubar");
+
+  if (!G_IS_PARAM_SPEC (pspec))
+    {
+      gtk_settings_install_property (g_param_spec_boolean (
+        "gtk-shell-shows-menubar",
+        "Desktop shell shows the menubar",
+        "Set to TRUE if the desktop environment is displaying the menubar, FALSE if the app should display it itself.",
+        FALSE,
+        G_PARAM_READWRITE
+      ));
+    }
+#endif
+}
+
 void
 gtk_module_init (void)
 {
   const gchar *proxy = g_getenv ("UBUNTU_MENUPROXY");
 
   /* We only support X11 and WAYLAND */
-#if (!defined(GDK_WINDOWING_X11) || !defined(GDK_WINDOWING_WAYLAND))
+#if ((GTK_MAJOR_VERSION == 3) && (!defined(GDK_WINDOWING_X11) || !defined(GDK_WINDOWING_WAYLAND)))
    return;
 #endif
 
@@ -1024,6 +1046,7 @@ gtk_module_init (void)
       GtkWidgetClass *widget_class;
       GSettings *gsettings;
 
+      sync_gtk2_settings();
       sync_shell_shows_menubar ();
       gsettings = g_settings_new (XSETTINGS_NAME);
       g_signal_connect (gsettings, "changed::"XSETTINGS_TARGET, G_CALLBACK (xsettings_shell_shows_menubar_changed), NULL);
