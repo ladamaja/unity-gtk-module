@@ -1,3 +1,48 @@
+unity-gtk-module (0.0.0+18.04.20171202-0ubuntu1) bionic; urgency=medium
+
+  * Don't depend on GTK+ 2 to allow these GTK+ 2 modules to be pre-
+    installed without requiring GTK+ 2 to be installed too
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Sat, 02 Dec 2017 03:27:59 +0000
+
+unity-gtk-module (0.0.0+17.10.20170817-0ubuntu1) artful; urgency=medium
+
+  * Properly limit the workaround to DnD windows only to complete the
+    intended implementation for LP: #1710999. Thanks to Konstantin
+    Putin. (LP: #1658996)
+
+ -- Martin Wimpress <martin.wimpress@canonical.com>  Thu, 17 Aug 2017 11:46:19 +0000
+
+unity-gtk-module (0.0.0+17.10.20170816-0ubuntu1) artful; urgency=medium
+
+  * Remove DnD windows from the hijack and always use RGBA visual in
+  realize. (LP: #1710999)
+
+ -- Martin Wimpress <martin.wimpress@canonical.com>  Wed, 16 Aug 2017 08:38:35 +0000
+
+unity-gtk-module (0.0.0+17.04.20170918-0ubuntu1) artful; urgency=medium
+
+  * Rename ubuntu-session systemd target to unity-session to inline with
+    new session name:
+    - ship unity-gtk-module service symlink in the new systemd target.
+    - Breaks against older version of ubuntu-session, now that unity-session
+      provides that new systemd target name.
+
+ -- Didier Roche <didrocks@ubuntu.com>  Mon, 19 Jun 2017 11:23:32 +0200
+
+unity-gtk-module (0.0.0+17.04.20170403-0ubuntu1) zesty; urgency=medium
+
+  [ William Hua ]
+  * Blacklist Anjuta
+
+ -- iain@orangesquash.org.uk <iain@orangesquash.org.uk>  Mon, 03 Apr 2017 16:52:34 +0000
+
+unity-gtk-module (0.0.0+16.10.20160913-0ubuntu1) yakkety; urgency=medium
+
+  * Fix $GTK_MODULES race condition (LP: #1618886)
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Tue, 13 Sep 2016 15:27:01 +0000
+
 unity-gtk-module (0.0.0+16.10.20160805-0ubuntu1) yakkety; urgency=medium
 
   [ Iain Lane ]
