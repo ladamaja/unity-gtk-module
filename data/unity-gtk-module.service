@@ -14,4 +14,4 @@ ExecStopPost=/bin/sh -ec '\
         dbus-update-activation-environment --verbose --systemd GTK_MODULES'
 
 [Install]
-WantedBy=ubuntu-session.target
+WantedBy=unity-session.target

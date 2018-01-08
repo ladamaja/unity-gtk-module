@@ -21,6 +21,7 @@ Section: libdevel
 Architecture: all
 Multi-Arch: foreign
 Depends: ${misc:Depends},
+Breaks: ubuntu-session (<< 3.24.1-0ubuntu3~),
 Description: Common files for GtkMenuShell to GMenuModel parser
  This library converts GtkMenuShells into GMenuModels.
  .
