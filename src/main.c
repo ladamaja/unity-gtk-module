@@ -37,6 +37,7 @@
 static const char * const BLACKLIST[] =
 {
   "acroread",
+  "anjuta",
   "emacs",
   "emacs23",
   "emacs23-lucid",
