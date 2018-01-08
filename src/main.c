@@ -49,6 +49,7 @@ static const char * const BLACKLIST[] =
   "gwyddion",
   NULL
 };
+static guint watcher_id = 0;
 
 #define UNITY_GTK_MODULE_SCHEMA "com.canonical.unity-gtk-module"
 #define BLACKLIST_KEY           "blacklist"
@@ -947,73 +948,10 @@ hijack_menu_bar_class_vtable (GType type)
   g_free (children);
 }
 
-static gboolean
-get_xsettings_shell_shows_menubar ()
-{
-  GSettings *gsettings;
-  GVariant *sources;
-  GVariantIter *iter;
-  GVariant *prop_value;
-  gchar *prop_name;
-  gint32 *value = 0;
-
-  gsettings = g_settings_new (XSETTINGS_NAME);
-  sources = g_settings_get_value (gsettings, XSETTINGS_TARGET);
-
-  g_variant_get (sources, "a{sv}", &iter);
-  while (g_variant_iter_loop (iter, "{sv}", &prop_name, &prop_value))
-    {
-      if ((g_strcmp0(prop_name, XSETTINGS_PROPERTY) == 0) && g_variant_is_of_type (prop_value, G_VARIANT_TYPE_INT32))
-        {
-          g_variant_get(prop_value, "i", &value);
-          break;
-        }
-    }
-  g_variant_iter_free (iter);
-  g_object_unref (gsettings);
-
-  return (GPOINTER_TO_INT(value) == 1);
-}
-
-static gboolean
-sync_shell_shows_menubar ()
-{
-  GtkSettings *settings;
-  GParamSpec *pspec;
-  gboolean shell_shows_menubar;
-  gboolean xsettings_shell_shows_menubar;
-
-  settings = gtk_settings_get_default();
-
-  g_return_val_if_fail (GTK_IS_SETTINGS (settings), FALSE);
-
-  pspec = g_object_class_find_property (G_OBJECT_GET_CLASS (settings), "gtk-shell-shows-menubar");
-
-  g_return_val_if_fail (G_IS_PARAM_SPEC (pspec), FALSE);
-  g_return_val_if_fail (pspec->value_type == G_TYPE_BOOLEAN, FALSE);
-
-  xsettings_shell_shows_menubar = get_xsettings_shell_shows_menubar ();
-  g_object_get (settings, "gtk-shell-shows-menubar", &shell_shows_menubar, NULL);
-
-  if (xsettings_shell_shows_menubar != shell_shows_menubar)
-    {
-      g_object_set (settings, "gtk-shell-shows-menubar", xsettings_shell_shows_menubar, NULL);
-      return TRUE;
-    }
-  return FALSE;
-}
-
-static void
-xsettings_shell_shows_menubar_changed (GSettings *settings, const gchar *key, gpointer data)
-{
-  sync_shell_shows_menubar ();
-}
-
 static void
 sync_gtk2_settings()
 {
 #if GTK_MAJOR_VERSION < 3
-  GtkSettings *settings;
   GParamSpec *pspec;
 
   pspec = g_object_class_find_property (g_type_class_ref (GTK_TYPE_SETTINGS), "gtk-shell-shows-menubar");
@@ -1031,6 +969,100 @@ sync_gtk2_settings()
 #endif
 }
 
+static gboolean
+is_dbus_present ()
+{
+  GDBusConnection *connection;
+  GVariant *ret, *names;
+  GVariantIter *iter;
+  gchar *name;
+  gboolean is_present;
+  GError *error = NULL;
+
+  is_present = FALSE;
+
+  connection = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, &error);
+  if (connection == NULL)
+    {
+      g_warning ("Unable to connect to dbus: %s", error->message);
+      g_error_free (error);
+      return FALSE;
+    }
+
+    ret = g_dbus_connection_call_sync (
+      connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+      "org.freedesktop.DBus", "ListNames", NULL, G_VARIANT_TYPE ("(as)"),
+      G_DBUS_CALL_FLAGS_NONE, -1, NULL, &error
+    );
+    if (ret == NULL)
+      {
+        g_warning ("Unable to query dbus: %s", error->message);
+        g_error_free (error);
+        return FALSE;
+      }
+    names = g_variant_get_child_value (ret, 0);
+    g_variant_get (names, "as", &iter);
+    while (g_variant_iter_loop (iter, "s", &name))
+      {
+        if (g_str_equal (name, "com.canonical.AppMenu.Registrar"))
+          {
+            is_present = TRUE;
+            break;
+          }
+      }
+    g_variant_iter_free (iter);
+    g_variant_unref (names);
+    g_variant_unref (ret);
+
+    return is_present;
+}
+
+static gboolean
+set_gtk_shell_shows_menubar (shows)
+{
+  GtkSettings *settings;
+  GParamSpec *pspec;
+
+  settings = gtk_settings_get_default();
+
+  g_return_val_if_fail (GTK_IS_SETTINGS (settings), FALSE);
+
+  pspec = g_object_class_find_property (G_OBJECT_GET_CLASS (settings), "gtk-shell-shows-menubar");
+
+  g_return_val_if_fail (G_IS_PARAM_SPEC (pspec), FALSE);
+  g_return_val_if_fail (pspec->value_type == G_TYPE_BOOLEAN, FALSE);
+
+  g_object_set (settings, "gtk-shell-shows-menubar", shows, NULL);
+
+  return TRUE;
+}
+
+static void
+on_name_appeared (GDBusConnection *connection, const gchar *name, const gchar *name_owner, gpointer user_data)
+{
+  set_gtk_shell_shows_menubar (TRUE);
+}
+
+static void
+on_name_vanished (GDBusConnection *connection, const gchar *name, gpointer user_data)
+{
+  set_gtk_shell_shows_menubar (FALSE);
+}
+
+static void
+watch_registrar_dbus()
+{
+  set_gtk_shell_shows_menubar (is_dbus_present ());
+
+  if (watcher_id == 0)
+    {
+      watcher_id = g_bus_watch_name (
+        G_BUS_TYPE_SESSION, "com.canonical.AppMenu.Registrar",
+        G_BUS_NAME_WATCHER_FLAGS_NONE, on_name_appeared, on_name_vanished, NULL, NULL
+      );
+    }
+}
+
 void
 gtk_module_init (void)
 {
@@ -1044,13 +1076,8 @@ gtk_module_init (void)
   if ((proxy == NULL || is_true (proxy)) && !is_blacklisted (g_get_prgname ()))
     {
       GtkWidgetClass *widget_class;
-      GSettings *gsettings;
-
       sync_gtk2_settings();
-      sync_shell_shows_menubar ();
-      gsettings = g_settings_new (XSETTINGS_NAME);
-      g_signal_connect (gsettings, "changed::"XSETTINGS_TARGET, G_CALLBACK (xsettings_shell_shows_menubar_changed), NULL);
-      g_object_unref (gsettings);
+      watch_registrar_dbus();
 
       unity_gtk_menu_shell_set_debug (is_true (g_getenv ("UNITY_GTK_MENU_SHELL_DEBUG")));
       unity_gtk_action_group_set_debug (is_true (g_getenv ("UNITY_GTK_ACTION_GROUP_DEBUG")));
